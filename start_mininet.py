@@ -100,7 +100,7 @@ def setup_addressing(net):
 
 def main():
     topo = PyRouterTopo(args)
-    net = Mininet(topo=topo, link=TCLink, cleanup=True)
+    net = Mininet(topo=topo, link=TCLink, cleanup=True, controller=None)
     setup_addressing(net)
     net.interact()
 
