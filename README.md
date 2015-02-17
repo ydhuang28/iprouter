@@ -4,7 +4,6 @@ cosc465-iprouter
 Repo for projects 3-6 (or so) for COSC 465, computer networking.
 
 run setup: `./setup.sh`
-activate venv: `. ./py3env/bin/activate`
 
 to run in test mode:
 
