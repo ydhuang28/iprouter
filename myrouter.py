@@ -2,6 +2,10 @@
 
 '''
 Basic IPv4 router (static routing) in Python.
+
+Collaborators: Yuxin David Huang, Martin Liu' 16
+Under supervision of Prof. Joel Sommers
+COSC 465 (Spring 2015), Colgate University
 '''
 
 import sys
@@ -13,16 +17,24 @@ from switchyard.lib.common import *
 
 class Router(object):
 	def __init__(self, net):
+		'''
+		(self, PyLLNet) -> ()
+
+		Initializes the router object.
+		'''
 		self.net = net
-		# other initialization stuff here
+		self.interfaces = self.net.interfaces()
 
+	def _has_interface(self, arp):
+		'''
 
+		'''
+		if arp.targetprotoaddr in self.interfaces:
+			return True, arp.targetprotoaddr, arp
+		else:
+			return False, None, None
 
-
-
-
-
-	def create_and_send_arp_reply(self, need_resp, intf, arp_req):
+	def _create_and_send_arp_reply(self, need_resp, target, arp_req):
 		if need_resp:
 			arp_reply = create_ip_arp_reply(arp_req.senderhwaddr,
 											arp.req.targethwaddr,
@@ -50,12 +62,12 @@ class Router(object):
 			if gotpkt:
 				log_debug("Got a packet: {}".format(str(pkt)))
 
-				# martin's method
-
-				need_resp, intf, arp_req = m_method(pkt)
-				create_and_send_arp_reply(self, need_resp, intf, arp_req)
-
-
+				arp = pkt.get_header(Arp)
+				if arp not None:
+					need_resp, targetip, arp_req = _has_interface(arp)
+					_create_and_send_arp_reply(self, need_resp, targetip, arp_req)
+		
+				
 
 def switchy_main(net):
 	'''
