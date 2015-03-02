@@ -37,21 +37,17 @@ class Router(object):
 				return True, arp.targetprotoaddr, arp
 		return False, None, None
 
-	def _create_arp_reply(self, need_resp, targetip, arp_req, dev):
+	def _create_arp_reply(self, targetip, arp_req, dev):
 		'''
-		(self, bool, IPv4Addr, Arp, Interface) -> (Packet)
+		(self, IPv4Addr, Arp, Interface) -> (Packet)
 
-		Sends an ARP reply if needed.
+		Creates an ARP reply.
 		'''
-		if need_resp:
-			arp_reply = create_ip_arp_reply(dev.ethaddr,
-											arp_req.senderhwaddr,
-											dev.ipaddr,
-											arp_req.senderprotoaddr)
-			return arp_reply
-		else:	# no need to reply
-			return None
-
+		arp_reply = create_ip_arp_reply(dev.ethaddr,
+										arp_req.senderhwaddr,
+										dev.ipaddr,
+										arp_req.senderprotoaddr)
+		return arp_reply
 
 	def router_main(self):    
 		'''
@@ -74,17 +70,13 @@ class Router(object):
 			if gotpkt:
 				log_debug("Got a packet: {}".format(str(pkt)))
 
-				arp = pkt.get_header(Arp)
-				if arp is not None:
+				if pkt.has_header(Arp):
+					arp = pkt.get_header(Arp)
 					need_resp, targetip, arp_req = self._has_interface(arp)
-					arp_reply = self._create_arp_reply(need_resp,
-													   targetip,
-													   arp_req,
-													   self.net.port_by_name(dev))
-					if arp_reply is not None:
-						self.net.send_packet(dev, arp_reply)
-		
-				
+					if need_resp:
+						arp_reply = self._create_arp_reply(targetip, arp_req,
+														   self.net.port_by_name(dev))
+						self.net.send_packet(dev, arp_reply)			
 
 def switchy_main(net):
 	'''
