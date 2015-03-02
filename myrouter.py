@@ -32,23 +32,25 @@ class Router(object):
 
 		Checks whether we need to respond to the ARP request.
 		'''
-		if arp.targetprotoaddr in self._interfaces:
-			return True, arp.targetprotoaddr, arp
-		else:
-			return False, None, None
+		for interface in self._interfaces:
+			if arp.targetprotoaddr == interface.ipaddr:
+				return True, arp.targetprotoaddr, arp
+		return False, None, None
 
-	def _create_and_send_arp_reply(self, need_resp, targetip, arp_req):
+	def _create_arp_reply(self, need_resp, targetip, arp_req, dev):
 		'''
-		(self, bool, IPv4Addr, Arp) -> ()
+		(self, bool, IPv4Addr, Arp, Interface) -> (Packet)
 
 		Sends an ARP reply if needed.
 		'''
 		if need_resp:
-			arp_reply = create_ip_arp_reply(arp_req.senderhwaddr,
-											arp.req.targethwaddr,
-											arp.req.senderprotoaddr,
-											targetip)
-			self.net.send_packet(port_by_ipaddr(targetip), arp_reply)
+			arp_reply = create_ip_arp_reply(dev.ethaddr,
+											arp_req.senderhwaddr,
+											dev.ipaddr,
+											arp_req.senderprotoaddr)
+			return arp_reply
+		else:	# no need to reply
+			return None
 
 
 	def router_main(self):    
@@ -73,9 +75,14 @@ class Router(object):
 				log_debug("Got a packet: {}".format(str(pkt)))
 
 				arp = pkt.get_header(Arp)
-				if arp != None:
-					need_resp, targetip, arp_req = _has_interface(arp)
-					_create_and_send_arp_reply(self, need_resp, targetip, arp_req)
+				if arp is not None:
+					need_resp, targetip, arp_req = self._has_interface(arp)
+					arp_reply = self._create_arp_reply(need_resp,
+													   targetip,
+													   arp_req,
+													   self.net.port_by_name(dev))
+					if arp_reply is not None:
+						self.net.send_packet(dev, arp_reply)
 		
 				
 
