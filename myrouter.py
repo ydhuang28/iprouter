@@ -18,7 +18,7 @@ from switchyard.lib.common import *
 class Router(object):
 	def __init__(self, net):
 		'''
-		(self, PyLLNet) -> ()
+		(PyLLNet) -> ()
 
 		Initializes the router object.
 		'''
@@ -28,7 +28,7 @@ class Router(object):
 
 	def _has_interface(self, arp):
 		'''
-		(self, Arp) -> (bool, IPv4Addr, Arp)
+		(Arp) -> (bool, IPv4Addr, Arp)
 
 		Checks whether we need to respond to the ARP request.
 		'''
@@ -39,7 +39,7 @@ class Router(object):
 
 	def _create_arp_reply(self, targetip, arp_req, dev):
 		'''
-		(self, IPv4Addr, Arp, Interface) -> (Packet)
+		(IPv4Addr, Arp, Interface) -> (Packet)
 
 		Creates an ARP reply.
 		'''
@@ -51,7 +51,7 @@ class Router(object):
 
 	def router_main(self):    
 		'''
-		(self) -> ()
+		() -> ()
 
 		Main method for router; we stay in a loop in this method, receiving
 		packets until the end of time.
