@@ -1,3 +1,5 @@
 forwarding_table.txt
 switchyard
 switchyard/*
+__pycache__
+__pycache__/*
