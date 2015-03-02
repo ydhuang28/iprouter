@@ -15,8 +15,15 @@ class Router(object):
     def __init__(self, net):
         self.net = net
         # other initialization stuff here
+        self.interfaces = self.net.interfaces()
 
-
+    def has_interface(self, arp):
+        if arp.targetprotoaddr in self.interfaces:
+            return True, arp.targetprotoaddr, arp
+        else:
+            return False, None, None
+        
+        
     def router_main(self):    
         '''
         Main method for router; we stay in a loop in this method, receiving
@@ -36,7 +43,11 @@ class Router(object):
             if gotpkt:
                 log_debug("Got a packet: {}".format(str(pkt)))
 
-
+            arp = pkt.get_header(Arp)
+            if arp not None:
+               #david calls has_interface
+        
+                
 
 def switchy_main(net):
     '''
