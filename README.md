@@ -1,7 +1,5 @@
-iprouter
+cosc465-iprouter
 ================
-
-Yuxin David Huang, Martin Liu '16, Colgate University
 
 Repo for projects 3-6 (or so) for COSC 465, computer networking.
 
