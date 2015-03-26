@@ -70,10 +70,10 @@ class Router(object):
 			if gotpkt:
 				log_debug("Got a packet: {}".format(str(pkt)))
 
-				if pkt.has_header(Arp):
-					arp = pkt.get_header(Arp)
+				if pkt.has_header(Arp):				# if this is an ARP packet
+					arp = pkt.get_header(Arp)		# get the header
 					need_resp, targetip, arp_req = self._has_interface(arp)
-					if need_resp:
+					if need_resp:					# if necessary to respond
 						arp_reply = self._create_arp_reply(targetip, arp_req,
 														   self.net.port_by_name(dev))
 						self.net.send_packet(dev, arp_reply)			
