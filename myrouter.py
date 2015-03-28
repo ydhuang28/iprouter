@@ -85,9 +85,16 @@ class Router(object):
 
 		return most_precise_prefix[1:]
 
-	def ready_packet(self, intf_name, ind, pkt, nexthop):
+	def ready_packet(self, intf_name, pkt, nexthop):
 		'''
-		Precondition: pkt has IPv4 header
+		(str, Packet, IPv4Address) -> ()
+
+		Precondition: pkt has IPv4 header.
+
+		Readies an IPv4 packet to be sent. If the nexthop
+		is already in the ARP cache, this will send the
+		packet to next hop. If not, it will place the packet
+		in a queue to wait for ARP requests.
 		'''
 		intf = self.net.interface_by_name(intf_name)
 
@@ -116,6 +123,21 @@ class Router(object):
 			self.arpqueue.put(queue_pkt)
 
 	def send_enqueued_packets(self):
+		'''
+		() -> ()
+
+		This method is periodically called in the main method
+		to check the packets in the ARP queue waiting for ARP 
+		replies.
+
+		If any packet's next hop sent an ARP reply,
+		this will send the packet along its way.
+
+		If not, it will check if it has been 1 second since the
+		last ARP reply for the next hop, and if it has, send
+		another ARP request unless 5 requests have already been
+		sent. In that case, the packet will be dropped.
+		'''
 		for i in range(self.arpqueue.qsize()):
 			curr_pkt = self.arpqueue.get()
 			# check cache
@@ -143,6 +165,12 @@ class Router(object):
 					curr_pkt.packet)
 
 	def create_arp_req(self, intf, targetip):
+		'''
+		(Interface, IPv4Address) -> (Packet)
+
+		Creates an ARP request using the interface
+		and the target IP address given.
+		'''
 		ether = Ethernet()
 		ether.src = intf.ethaddr
 		ether.dst = 'ff:ff:ff:ff:ff:ff'
@@ -199,7 +227,7 @@ class Router(object):
 					intf, index, nexthop = self.fwdtable_lookup(ipv4)
 					if index != -1 and index != -2:	# has a match
 						# debugger()
-						self.ready_packet(intf, index, pkt, nexthop)
+						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
 					elif index == -1:	# no match
 						log_info("No match in fwding table, dropping: {}".format(str(pkt)))
@@ -210,7 +238,20 @@ class Router(object):
 			self.send_enqueued_packets()
 
 class ARPQueuePacket(object):
+	'''
+	A class that represents a packet waiting in the
+	ARP queue.
+
+	Contains information about number of retries,
+	time of last ARP request, which interface to send
+	once gets ARP reply, and the next hop it should
+	be sent to.
+	'''
 	def __init__(self, pkt, intf):
+		'''
+		Initializes the queue packet, encapsulating
+		the original packet.
+		'''
 		self.packet = pkt
 		self.retries = 0
 		self.last_request = time.time()
@@ -218,9 +259,20 @@ class ARPQueuePacket(object):
 		self.nexthop = IPv4Address(0)
 
 	def is_dead(self):
+		'''
+		() -> (bool)
+
+		Returns true if too many retries (more than 5)
+		and false otherwise.
+		'''
 		return self.retries > 5
 
 	def update_rqst_time(self, time):
+		'''
+		(long) -> ()
+
+		Updates the last ARP request time.
+		'''
 		self.last_resend = time
 
 def switchy_main(net):
