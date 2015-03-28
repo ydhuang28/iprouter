@@ -176,7 +176,6 @@ class Router(object):
 				log_debug("Got shutdown signal")
 				break
 
-			self.send_enqueued_packets()
 			if gotpkt:
 				log_info("Got a packet: {}".format(str(pkt)))
 				
@@ -191,7 +190,6 @@ class Router(object):
 															dev.ipaddr,
 															arp.senderprotoaddr)
 							self.net.send_packet(dev_name, arp_reply)
-							self.send_enqueued_packets()
 						else: # got reply
 							self.arpcache[arp.senderprotoaddr] = arp.senderhwaddr
 							self.send_enqueued_packets()
@@ -209,6 +207,7 @@ class Router(object):
 						log_info("Packet for us, dropping: {}".format(str(pkt)))
 				else:
 					log_info("Got packet that is not ARP or IPv4, dropping: {}".format(str(pkt)))
+			self.send_enqueued_packets()
 
 class ARPQueuePacket(object):
 	def __init__(self, pkt, intf):
