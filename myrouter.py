@@ -25,6 +25,9 @@ class Router(object):
 		'''
 		self.net = net
 		self.interfaces = self.net.interfaces()
+
+		# in the forwarding table, a next hop of '0.0.0.0' is a directly
+		# connected network. but that is probably bad design.
 		self.fwdtable = {}
 		self.fill_fwdtable()
 		self.arpcache = {}
@@ -98,9 +101,11 @@ class Router(object):
 		'''
 		intf = self.net.interface_by_name(intf_name)
 
+		# ipv4 header is second
 		ipv4 = pkt[1]
 		ipv4.ttl -= 1
 
+		# ethernet header is first
 		eth = pkt[0]
 		eth.src = intf.ethaddr
 
@@ -225,6 +230,9 @@ class Router(object):
 						log_info("ARP request not for us, dropping: {}".format(str(pkt)))
 				elif ipv4 is not None:	# has IPv4 header
 					intf, index, nexthop = self.fwdtable_lookup(ipv4)
+
+					## ---- TO DO: better indication of whether the forwarding table has a match ---- ##
+
 					if index != -1 and index != -2:	# has a match
 						# debugger()
 						self.ready_packet(intf, pkt, nexthop)
