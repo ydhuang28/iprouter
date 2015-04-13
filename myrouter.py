@@ -193,16 +193,21 @@ class Router(object):
 
 		return arppacket
 
-	def send_unreachable(self, ipv4):
+	def send_error(self, ipv4, error_type):
 		'''
-		Sends send_unreachable error ICMP packet back to the sender 
-		through the interface through which the error-inducing ipv4 packet is received 
+		Sends error message back to the host 
+		through the interface through which the error-inducing
+		ipv4 packet is received 
 		'''
 		i = ICMP()
-		i.icmptype = ICMPTYPE.DestinationUnreachable
-		i.icmpcode = 0
+		if error_type == 0: #dst unreachable
+			i.icmptype = ICMPTYPE.DestinationUnreachable
+			i.icmpcode = 0
+		elif error_type == 1: #timeexceeded
+			i.icmpcode = ICMPTYPE.timeexceeded
+			i.icmpcode = 11
 		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
-		self.net.send_packet(self.net.interface_by_name(intf_name), IPv4Address(ipv4.srcip)) 
+		self.net.send_packet(self.net.interface_by_name(intf_name), i) 
 
 
 
@@ -253,7 +258,7 @@ class Router(object):
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
 					elif index == -1:	# no match
-						send_unreachable(ipv4)
+						send_unreachable(ipv4, 0)
 						#log_info("No match in fwding table, dropping: {}".format(str(pkt)))
 					else:	# index == -2, our packet; drop it for now
 						log_info("Packet for us, dropping: {}".format(str(pkt)))
