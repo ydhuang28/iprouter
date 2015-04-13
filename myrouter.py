@@ -76,7 +76,7 @@ class Router(object):
 		associated with the interface in question.
 		'''
 		dst_ipaddr = IPv4Address(ipv4.dstip)
-		if src_lookup:
+		if src_lookup: #for sending error message back to host
 			dst_ipaddr = IPv4Address(ipv4.srcip)
 		most_precise_prefix = (None, None, -1, None)
 
@@ -107,6 +107,9 @@ class Router(object):
 		# ipv4 header is second
 		ipv4 = pkt[1]
 		ipv4.ttl -= 1
+		if ipv4.ttl == 0:
+			send_error(ipv4, 1)
+			return
 
 		# ethernet header is first
 		eth = pkt[0]
@@ -121,12 +124,17 @@ class Router(object):
 			self.net.send_packet(intf.name, pkt)
 		else:	# create ARP request
 			arppacket = self.create_arp_req(intf, nexthop)
+			queue_pkt.retries += 1
+			if queue_pkt.retries == 6:
+				send_error(ipv4, 2)
+
 			self.net.send_packet(intf.name, arppacket)
 			senttime = time.time()
 
 			queue_pkt = ARPQueuePacket(pkt, intf)
 			queue_pkt.update_rqst_time(senttime)
-			queue_pkt.retries += 1
+			
+
 			queue_pkt.nexthop = nexthop
 			self.arpqueue.put(queue_pkt)
 
@@ -199,15 +207,28 @@ class Router(object):
 		through the interface through which the error-inducing
 		ipv4 packet is received 
 		'''
-		i = ICMP()
+		icmp = ICMP()
+		error_pkt = ipv4
+		i = error_pkt.get_header_index(Ethernet)
+		del error_pkt[i]
+
 		if error_type == 0: #dst unreachable
-			i.icmptype = ICMPTYPE.DestinationUnreachable
-			i.icmpcode = 0
+			icmp.icmptype = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 0 #network unreachable
 		elif error_type == 1: #timeexceeded
-			i.icmpcode = ICMPTYPE.timeexceeded
-			i.icmpcode = 11
+			icmp.icmpcode = ICMPTYPE.TimeExceeded
+			icmp.icmpcode = 0 #tll expired
+		elif error_type == 2: #arp failure
+			icmp.icmpcode = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 1 #host unreachable
+		else: #dst port unreachable
+
+		icmp.icmpdata.data = error_pkt.to_bytes()[:28]
+		ip = IPv4()
+		ip.protocol = IPProtocol.ICMP
+		errmsg_pkt = ip + icmp
 		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
-		self.net.send_packet(self.net.interface_by_name(intf_name), i) 
+		self.net.send_packet(self.net.interface_by_name(intf_name), errmsg_pkt) 
 
 
 
