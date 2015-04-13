@@ -64,7 +64,7 @@ class Router(object):
 
 		forwarding_table.close()
 
-	def fwdtable_lookup(self, ipv4):
+	def fwdtable_lookup(self, ipv4, src_lookup):
 		'''
 		(IPv4) -> (str, int)
 
@@ -76,7 +76,10 @@ class Router(object):
 		associated with the interface in question.
 		'''
 		dst_ipaddr = IPv4Address(ipv4.dstip)
+		if src_lookup:
+			dst_ipaddr = IPv4Address(ipv4.srcip)
 		most_precise_prefix = (None, None, -1, None)
+
 		for intf in self.fwdtable.keys():				# every interface in forwarding table
 			for i in range(len(self.fwdtable[intf])):	# every prefix asc.'d w/ the interface
 				prefixnet, nexthop = self.fwdtable[intf][i]
@@ -190,6 +193,20 @@ class Router(object):
 
 		return arppacket
 
+	def send_unreachable(self, ipv4):
+		'''
+		Sends send_unreachable error ICMP packet back to the sender 
+		through the interface through which the error-inducing ipv4 packet is received 
+		'''
+		i = ICMP()
+		i.icmptype = ICMPTYPE.DestinationUnreachable
+		i.icmpcode = 0
+		temp_ipv4 = IPV4()
+		temp_ipv4.
+		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
+		self.net.send_packet(self.net.interface_by_name(intf_name), IPv4Address(ipv4.srcip)) 
+
+
 
 	def router_main(self):    
 		'''
@@ -229,7 +246,7 @@ class Router(object):
 					else:
 						log_info("ARP request not for us, dropping: {}".format(str(pkt)))
 				elif ipv4 is not None:	# has IPv4 header
-					intf, index, nexthop = self.fwdtable_lookup(ipv4)
+					intf, index, nexthop = self.fwdtable_lookup(ipv4, False)
 
 					## ---- TO DO: better indication of whether the forwarding table has a match ---- ##
 
@@ -238,12 +255,16 @@ class Router(object):
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
 					elif index == -1:	# no match
-						log_info("No match in fwding table, dropping: {}".format(str(pkt)))
+						send_unreachable(ipv4)
+						#log_info("No match in fwding table, dropping: {}".format(str(pkt)))
 					else:	# index == -2, our packet; drop it for now
 						log_info("Packet for us, dropping: {}".format(str(pkt)))
 				else:
 					log_info("Got packet that is not ARP or IPv4, dropping: {}".format(str(pkt)))
 			self.send_enqueued_packets()
+
+
+
 
 class ARPQueuePacket(object):
 	'''
