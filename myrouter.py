@@ -201,8 +201,6 @@ class Router(object):
 		i = ICMP()
 		i.icmptype = ICMPTYPE.DestinationUnreachable
 		i.icmpcode = 0
-		temp_ipv4 = IPV4()
-		temp_ipv4.
 		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
 		self.net.send_packet(self.net.interface_by_name(intf_name), IPv4Address(ipv4.srcip)) 
 
