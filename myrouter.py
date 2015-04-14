@@ -212,16 +212,21 @@ class Router(object):
 		i = error_pkt.get_header_index(Ethernet)
 		del error_pkt[i]
 
-		if error_type == 0: #dst unreachable
+		if error_type == 0: 		#dst unreachable
 			icmp.icmptype = ICMPTYPE.DestinationUnreachable
-			icmp.icmpcode = 0 #network unreachable
-		elif error_type == 1: #timeexceeded
+			icmp.icmpcode = 0 #NetworkUnreachable: 0
+
+		elif error_type == 1: 		#timeexceeded
 			icmp.icmpcode = ICMPTYPE.TimeExceeded
-			icmp.icmpcode = 0 #tll expired
-		elif error_type == 2: #arp failure
+			icmp.icmpcode = 0 #TTLExpired: 0
+
+		elif error_type == 2:		 #arp failure
 			icmp.icmpcode = ICMPTYPE.DestinationUnreachable
-			icmp.icmpcode = 1 #host unreachable
-		else: #dst port unreachable
+			icmp.icmpcode = 1 #HostUnreachable: 1
+
+		else:						 #dst port unreachable
+			icmp.icmptype = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 3 #PortUnreachable: 3
 
 		icmp.icmpdata.data = error_pkt.to_bytes()[:28]
 		ip = IPv4()
@@ -229,7 +234,6 @@ class Router(object):
 		errmsg_pkt = ip + icmp
 		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
 		self.net.send_packet(self.net.interface_by_name(intf_name), errmsg_pkt) 
-
 
 
 	def router_main(self):    
@@ -241,6 +245,7 @@ class Router(object):
 		'''
 		while True:
 			gotpkt = True
+			not_ICMPEcho = True
 			try:
 				dev_name, pkt = self.net.recv_packet(timeout=1.0)
 			except NoPackets:
