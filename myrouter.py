@@ -64,7 +64,7 @@ class Router(object):
 
 		forwarding_table.close()
 
-	def fwdtable_lookup(self, ipv4):
+	def fwdtable_lookup(self, ipv4, src_lookup):
 		'''
 		(IPv4) -> (str, int)
 
@@ -76,7 +76,10 @@ class Router(object):
 		associated with the interface in question.
 		'''
 		dst_ipaddr = IPv4Address(ipv4.dstip)
+		if src_lookup: #for sending error message back to host
+			dst_ipaddr = IPv4Address(ipv4.srcip)
 		most_precise_prefix = (None, None, -1, None)
+
 		for intf in self.fwdtable.keys():				# every interface in forwarding table
 			if str(intf.ipaddr) == ipv4.dstip:			# ourselves
 				return (ipv4.dstip, -2, ipv4.dstip)		# -2 for ourselves
@@ -105,6 +108,9 @@ class Router(object):
 
 		ipv4 = pkt[pkt.get_header_index(IPv4)]
 		ipv4.ttl -= 1
+		if ipv4.ttl == 0:
+			send_error(ipv4, 1)
+			return
 
 		eth = pkt[pkt.get_header_index(Ethernet)]
 		eth.src = intf.ethaddr
@@ -118,12 +124,17 @@ class Router(object):
 			self.net.send_packet(intf.name, pkt)
 		else:	# create ARP request
 			arppacket = self.create_arp_req(intf, nexthop)
+			queue_pkt.retries += 1
+			if queue_pkt.retries == 6:
+				send_error(ipv4, 2)
+
 			self.net.send_packet(intf.name, arppacket)
 			senttime = time.time()
 
 			queue_pkt = ARPQueuePacket(pkt, intf)
 			queue_pkt.update_rqst_time(senttime)
-			queue_pkt.retries += 1
+			
+
 			queue_pkt.nexthop = nexthop
 			self.arpqueue.put(queue_pkt)
 
@@ -190,6 +201,7 @@ class Router(object):
 
 		return arppacket
 
+
 	def create_icmp_reply(self, ipv4hdr, icmphdr):
 		'''
 		(IPv4) -> Packet
@@ -203,6 +215,41 @@ class Router(object):
 		return None
 
 
+	def send_error(self, ipv4, error_type):
+		'''
+		Sends error message back to the host 
+		through the interface through which the error-inducing
+		ipv4 packet is received 
+		'''
+		icmp = ICMP()
+		error_pkt = ipv4
+		i = error_pkt.get_header_index(Ethernet)
+		del error_pkt[i]
+
+		if error_type == 0: 		#dst unreachable
+			icmp.icmptype = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 0 #NetworkUnreachable: 0
+
+		elif error_type == 1: 		#timeexceeded
+			icmp.icmpcode = ICMPTYPE.TimeExceeded
+			icmp.icmpcode = 0 #TTLExpired: 0
+
+		elif error_type == 2:		 #arp failure
+			icmp.icmpcode = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 1 #HostUnreachable: 1
+
+		else:						 #dst port unreachable
+			icmp.icmptype = ICMPTYPE.DestinationUnreachable
+			icmp.icmpcode = 3 #PortUnreachable: 3
+
+		icmp.icmpdata.data = error_pkt.to_bytes()[:28]
+		ip = IPv4()
+		ip.protocol = IPProtocol.ICMP
+		errmsg_pkt = ip + icmp
+		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
+		self.net.send_packet(self.net.interface_by_name(intf_name), errmsg_pkt) 
+
+
 	def router_main(self):    
 		'''
 		() -> ()
@@ -212,6 +259,7 @@ class Router(object):
 		'''
 		while True:
 			gotpkt = True
+			not_ICMPEcho = True
 			try:
 				dev_name, pkt = self.net.recv_packet(timeout=1.0)
 			except NoPackets:
@@ -242,7 +290,8 @@ class Router(object):
 					else:
 						log_info("ARP request not for us, dropping: {}".format(str(pkt)))
 				elif ipv4 is not None:	# has IPv4 header
-					intf, index, nexthop = self.fwdtable_lookup(ipv4)
+					intf, index, nexthop = self.fwdtable_lookup(ipv4, False)
+
 					if index != -1 and index != -2:	# has a match
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
@@ -255,8 +304,16 @@ class Router(object):
 								icmp_reply = self.create_icmp_reply(ipv4, icmp)
 								intf, index, nexthop = self.fwdtable_lookup(icmp_reply.get_header(IPv4))
 								self.ready_packet(intf, icmp_reply, nexthop)
-
+						send_unreachable(ipv4, 0)
+						#log_info("No match in fwding table, dropping: {}".format(str(pkt)))
+					else:	# index == -2, our packet; drop it for now
+						log_info("Packet for us, dropping: {}".format(str(pkt)))
+				else:
+					log_info("Got packet that is not ARP or IPv4, dropping: {}".format(str(pkt)))
 			self.send_enqueued_packets()
+
+
+
 
 class ARPQueuePacket(object):
 	'''
