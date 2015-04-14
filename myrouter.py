@@ -78,6 +78,8 @@ class Router(object):
 		dst_ipaddr = IPv4Address(ipv4.dstip)
 		most_precise_prefix = (None, None, -1, None)
 		for intf in self.fwdtable.keys():				# every interface in forwarding table
+			if str(intf.ipaddr) == ipv4.dstip:			# ourselves
+				return (ipv4.dstip, -2, ipv4.dstip)		# -2 for ourselves
 			for i in range(len(self.fwdtable[intf])):	# every prefix asc.'d w/ the interface
 				prefixnet, nexthop = self.fwdtable[intf][i]
 				if dst_ipaddr in prefixnet:
@@ -101,12 +103,10 @@ class Router(object):
 		'''
 		intf = self.net.interface_by_name(intf_name)
 
-		# ipv4 header is second
-		ipv4 = pkt[1]
+		ipv4 = pkt[pkt.get_header_index(IPv4)]
 		ipv4.ttl -= 1
 
-		# ethernet header is first
-		eth = pkt[0]
+		eth = pkt[pkt.get_header_index(Ethernet)]
 		eth.src = intf.ethaddr
 
 		if str(nexthop) == "0.0.0.0":	# directly connected network
@@ -164,7 +164,7 @@ class Router(object):
 				else:	# put it back if it hasn't been a second
 					self.arpqueue.put(curr_pkt)
 			else:	# got ARP reply
-				eth = curr_pkt.packet[0]
+				eth = curr_pkt.packet[curr_pkt.get_header_index(Ethernet)]
 				eth.dst = self.arpcache[curr_pkt.nexthop]
 				self.net.send_packet(curr_pkt.interface_tosend.name, 
 					curr_pkt.packet)
@@ -190,6 +190,18 @@ class Router(object):
 
 		return arppacket
 
+	def create_icmp_reply(self, ipv4hdr, icmphdr):
+		'''
+		(IPv4) -> Packet
+
+		Creates an ICMP reply based on the header given.
+		'''
+		
+		icmp = ICMP()
+
+
+		return None
+
 
 	def router_main(self):    
 		'''
@@ -214,6 +226,7 @@ class Router(object):
 				
 				arp = pkt.get_header(Arp)
 				ipv4 = pkt.get_header(IPv4)
+				icmp = pkt.get_header(ICMP)
 				dev = self.net.interface_by_name(dev_name)
 				if arp is not None:		# has ARP header
 					if arp.targetprotoaddr == dev.ipaddr:
@@ -230,19 +243,19 @@ class Router(object):
 						log_info("ARP request not for us, dropping: {}".format(str(pkt)))
 				elif ipv4 is not None:	# has IPv4 header
 					intf, index, nexthop = self.fwdtable_lookup(ipv4)
-
-					## ---- TO DO: better indication of whether the forwarding table has a match ---- ##
-
 					if index != -1 and index != -2:	# has a match
-						# debugger()
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
 					elif index == -1:	# no match
 						log_info("No match in fwding table, dropping: {}".format(str(pkt)))
-					else:	# index == -2, our packet; drop it for now
-						log_info("Packet for us, dropping: {}".format(str(pkt)))
-				else:
-					log_info("Got packet that is not ARP or IPv4, dropping: {}".format(str(pkt)))
+					else:	# index == -2, our packet; check ICMP request
+						log_info("Packet for us: {}".format(str(pkt)))
+						if icmp is not None:	# has ICMP header
+							if icmp.icmptype == ICMPType.EchoRequest:	# is echo request
+								icmp_reply = self.create_icmp_reply(ipv4, icmp)
+								intf, index, nexthop = self.fwdtable_lookup(icmp_reply.get_header(IPv4))
+								self.ready_packet(intf, icmp_reply, nexthop)
+
 			self.send_enqueued_packets()
 
 class ARPQueuePacket(object):
