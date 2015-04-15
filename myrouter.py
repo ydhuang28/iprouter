@@ -106,9 +106,6 @@ class Router(object):
 
 		ipv4 = pkt[pkt.get_header_index(IPv4)]
 		ipv4.ttl -= 1
-		if ipv4.ttl == 0:
-			send_error(ipv4, 1)
-			return
 
 		eth = pkt[pkt.get_header_index(Ethernet)]
 		eth.src = intf.ethaddr
@@ -123,7 +120,7 @@ class Router(object):
 		else:	# create ARP request
 			arppacket = self.create_arp_req(intf, nexthop)
 			queue_pkt.retries += 1
-			if queue_pkt.retries == 6:
+			if queue_pkt.retries == 6: #ARP failure, more than 5 retries
 				send_error(ipv4, 2)
 
 			self.net.send_packet(intf.name, arppacket)
@@ -135,6 +132,10 @@ class Router(object):
 
 			queue_pkt.nexthop = nexthop
 			self.arpqueue.put(queue_pkt)
+
+		if ipv4.ttl == 0: #TLL exceed error
+			send_error(ipv4, 1)
+	
 
 	def send_enqueued_packets(self):
 		'''
@@ -294,16 +295,19 @@ class Router(object):
 					if index != -1 and index != -2:	# has a match
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
+						
 					elif index == -1:	# no match
-						log_info("No match in fwding table, dropping: {}".format(str(pkt)))
+						send_unreachable(ipv4, 0)  #destination network unreachable error 
+
 					else:	# index == -2, our packet; check ICMP request
-						log_info("Packet for us: {}".format(str(pkt)))
+						#log_info("Packet for us: {}".format(str(pkt)))
 						if icmp is not None:	# has ICMP header
 							if icmp.icmptype == ICMPType.EchoRequest:	# is echo request
 								icmp_reply = self.create_icmp_reply(ipv4, icmp)
 								intf, index, nexthop = self.fwdtable_lookup(icmp_reply.get_header(IPv4))
 								self.ready_packet(intf, icmp_reply, nexthop)
-						send_unreachable(ipv4, 0)
+						else:
+							send_error(ipv4, 3) #not an ICMPEcho request, destination port unreachable error
 						#log_info("No match in fwding table, dropping: {}".format(str(pkt)))
 					else:	# index == -2, our packet; drop it for now
 						log_info("Packet for us, dropping: {}".format(str(pkt)))
