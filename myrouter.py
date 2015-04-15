@@ -66,7 +66,7 @@ class Router(object):
 
 	def fwdtable_lookup(self, ipv4, src_lookup):
 		'''
-		(IPv4) -> (str, int)
+		(IPv4) -> (str, int, str)
 
 		Looks up a certain IPv4 address in the forwarding table,
 		returning the entry in the table.
@@ -75,15 +75,13 @@ class Router(object):
 		specifies which item to look for in the list of network prefixes
 		associated with the interface in question.
 		'''
-		dst_ipaddr = IPv4Address(ipv4.dstip)
-		if src_lookup: #for sending error message back to host
-			dst_ipaddr = IPv4Address(ipv4.srcip)
+		dst_ipaddr = IPv4Address(ipv4.dstip) if !src_lookup else IPv4Address(ipv4.srcip)
 		most_precise_prefix = (None, None, -1, None)
 
-		for intf in self.fwdtable.keys():				# every interface in forwarding table
-			if str(intf.ipaddr) == ipv4.dstip:			# ourselves
-				return (ipv4.dstip, -2, ipv4.dstip)		# -2 for ourselves
-			for i in range(len(self.fwdtable[intf])):	# every prefix asc.'d w/ the interface
+		for intf in self.fwdtable.keys():						# every interface in forwarding table
+			if intf.ipaddr == dst_ipaddr:						# ourselves
+				return (str(dst_ipaddr), -2, str(dst_ipaddr)	# -2 for ourselves
+			for i in range(len(self.fwdtable[intf])):			# every prefix asc.'d w/ the interface
 				prefixnet, nexthop = self.fwdtable[intf][i]
 				if dst_ipaddr in prefixnet:
 					if most_precise_prefix[0] == None:
@@ -221,6 +219,7 @@ class Router(object):
 		through the interface through which the error-inducing
 		ipv4 packet is received 
 		'''
+
 		icmp = ICMP()
 		error_pkt = ipv4
 		i = error_pkt.get_header_index(Ethernet)
