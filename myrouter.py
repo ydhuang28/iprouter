@@ -75,19 +75,21 @@ class Router(object):
 		specifies which item to look for in the list of network prefixes
 		associated with the interface in question.
 		'''
-		dst_ipaddr = IPv4Address(ipv4.dstip) if !src_lookup else IPv4Address(ipv4.srcip)
+		dst_ipaddr = IPv4Address(ipv4.srcip) if src_lookup else IPv4Address(ipv4.dstip)
 		most_precise_prefix = (None, None, -1, None)
 
-		for intf in self.fwdtable.keys():						# every interface in forwarding table
-			if intf.ipaddr == dst_ipaddr:						# ourselves
-				return (str(dst_ipaddr), -2, str(dst_ipaddr)	# -2 for ourselves
-			for i in range(len(self.fwdtable[intf])):			# every prefix asc.'d w/ the interface
-				prefixnet, nexthop = self.fwdtable[intf][i]
+
+		for intf_name in self.fwdtable.keys():						# every interface in forwarding table
+			intf = self.net.interface_by_name(intf_name)
+			if intf.ipaddr == dst_ipaddr:							# ourselves
+				return (str(dst_ipaddr), -2, str(dst_ipaddr))		# -2 for ourselves
+			for i in range(len(self.fwdtable[intf_name])):			# every prefix asc.'d with the interface
+				prefixnet, nexthop = self.fwdtable[intf_name][i]
 				if dst_ipaddr in prefixnet:
 					if most_precise_prefix[0] == None:
-						most_precise_prefix = (prefixnet, intf, i, nexthop)
+						most_precise_prefix = (prefixnet, intf_name, i, nexthop)
 					elif most_precise_prefix[0].prefixlen < prefixnet.prefixlen:
-						most_precise_prefix = (prefixnet, intf, i, nexthop)
+						most_precise_prefix = (prefixnet, intf_name, i, nexthop)
 
 		return most_precise_prefix[1:]
 
@@ -104,10 +106,13 @@ class Router(object):
 		'''
 		intf = self.net.interface_by_name(intf_name)
 
-		ipv4 = pkt[pkt.get_header_index(IPv4)]
+		ipv4 = pkt.get_header(IPv4)
 		ipv4.ttl -= 1
+		if ipv4.ttl == 0:
+			self.report_error(pkt, 1)
+			return
 
-		eth = pkt[pkt.get_header_index(Ethernet)]
+		eth = pkt.get_header(Ethernet)
 		eth.src = intf.ethaddr
 
 		if str(nexthop) == "0.0.0.0":	# directly connected network
@@ -119,9 +124,6 @@ class Router(object):
 			self.net.send_packet(intf.name, pkt)
 		else:	# create ARP request
 			arppacket = self.create_arp_req(intf, nexthop)
-			queue_pkt.retries += 1
-			if queue_pkt.retries == 6: #ARP failure, more than 5 retries
-				send_error(ipv4, 2)
 
 			self.net.send_packet(intf.name, arppacket)
 			senttime = time.time()
@@ -129,12 +131,8 @@ class Router(object):
 			queue_pkt = ARPQueuePacket(pkt, intf)
 			queue_pkt.update_rqst_time(senttime)
 			
-
 			queue_pkt.nexthop = nexthop
 			self.arpqueue.put(queue_pkt)
-
-		if ipv4.ttl == 0: #TLL exceed error
-			send_error(ipv4, 1)
 	
 
 	def send_enqueued_packets(self):
@@ -161,7 +159,7 @@ class Router(object):
 				if time.time() - curr_pkt.last_request > 1:
 					# ARP again
 					curr_pkt.retries += 1
-					if not curr_pkt.is_dead():
+					if curr_pkt.retries < 5:
 						arppacket = self.create_arp_req(curr_pkt.interface_tosend,
 							curr_pkt.nexthop)
 						self.net.send_packet(curr_pkt.interface_tosend.name, arppacket)
@@ -171,10 +169,11 @@ class Router(object):
 					else:
 						log_debug('Too many ARP requests, dropping packet: {}'
 							.format(str(curr_pkt.packet)))
+						self.report_error(curr_pkt.packet, 2)
 				else:	# put it back if it hasn't been a second
 					self.arpqueue.put(curr_pkt)
 			else:	# got ARP reply
-				eth = curr_pkt.packet[curr_pkt.get_header_index(Ethernet)]
+				eth = curr_pkt.packet.get_header(Ethernet)
 				eth.dst = self.arpcache[curr_pkt.nexthop]
 				self.net.send_packet(curr_pkt.interface_tosend.name, 
 					curr_pkt.packet)
@@ -201,53 +200,89 @@ class Router(object):
 		return arppacket
 
 
-	def create_icmp_reply(self, ipv4hdr, icmphdr):
+	def create_icmp_reply(self, echo_request):
 		'''
-		(IPv4) -> Packet
+		(Packet) -> Packet
 
-		Creates an ICMP reply based on the header given.
+		Creates an ICMP reply based on the echo request given.
+
+		Precondition: request has ipv4 and icmp headers
 		'''
 		
+		icmp_req_hdr = echo_request.get_header(ICMP)
+		ipv4hdr = echo_request.get_header(IPv4)
+
 		icmp = ICMP()
+		icmp.icmpcode = 0
+		icmp.icmptype = ICMPType.EchoReply
+		icmp.icmpdata.identifier = icmp_req_hdr.icmpdata.identifier
+		icmp.icmpdata.sequence = icmp_req_hdr.icmpdata.sequence
+		icmp.icmpdata.data = icmp_req_hdr.icmpdata.data
+
+		intf_name, match, nexthop = self.fwdtable_lookup(ipv4hdr, True)
+		intf = self.net.interface_by_name(intf_name)
+
+		ip = IPv4()
+		ip.dstip = ipv4hdr.srcip
+		ip.srcip = ipv4hdr.dstip
+		ip.ttl = 65
+
+		eth = Ethernet()
+		eth.ethertype = EtherType.IPv4
+		eth.src = intf.ethaddr
+
+		icmp_reply = eth + ip + icmp
+
+		return icmp_reply, intf_name, nexthop
 
 
-		return None
-
-
-	def send_error(self, ipv4, error_type):
+	def report_error(self, pkt, error_type):
 		'''
 		Sends error message back to the host 
 		through the interface through which the error-inducing
 		ipv4 packet is received 
 		'''
 
+		i = pkt.get_header_index(Ethernet)
+		del pkt[i]
+
+		ipv4 = pkt.get_header(IPv4)
+
 		icmp = ICMP()
-		error_pkt = ipv4
-		i = error_pkt.get_header_index(Ethernet)
-		del error_pkt[i]
 
-		if error_type == 0: 		#dst unreachable
-			icmp.icmptype = ICMPTYPE.DestinationUnreachable
-			icmp.icmpcode = 0 #NetworkUnreachable: 0
+		if error_type == 0:			# dst unreachable
+			icmp.icmptype = ICMPType.DestinationUnreachable
+			icmp.icmpcode = ICMPTypeCodeMap[ICMPType.DestinationUnreachable].NetworkUnreachable
 
-		elif error_type == 1: 		#timeexceeded
-			icmp.icmpcode = ICMPTYPE.TimeExceeded
-			icmp.icmpcode = 0 #TTLExpired: 0
+		elif error_type == 1: 		# timeexceeded
+			icmp.icmptype = ICMPType.TimeExceeded
+			icmp.icmpcode = ICMPTypeCodeMap[ICMPType.TimeExceeded].TTLExpired # TTLExpired: 11
 
-		elif error_type == 2:		 #arp failure
-			icmp.icmpcode = ICMPTYPE.DestinationUnreachable
-			icmp.icmpcode = 1 #HostUnreachable: 1
+		elif error_type == 2:		# arp failure
+			icmp.icmptype = ICMPType.DestinationUnreachable
+			icmp.icmpcode = ICMPTypeCodeMap[ICMPType.DestinationUnreachable].HostUnreachable # HostUnreachable: 1
 
-		else:						 #dst port unreachable
-			icmp.icmptype = ICMPTYPE.DestinationUnreachable
-			icmp.icmpcode = 3 #PortUnreachable: 3
+		else:						# dst port unreachable
+			icmp.icmptype = ICMPType.DestinationUnreachable
+			icmp.icmpcode = ICMPTypeCodeMap[ICMPType.DestinationUnreachable].PortUnreachable # PortUnreachable: 3
 
-		icmp.icmpdata.data = error_pkt.to_bytes()[:28]
+		icmp.icmpdata.data = pkt.to_bytes()[:28]
+
+		intf_name, match, nexthop = self.fwdtable_lookup(ipv4, True)
+		intf = self.net.interface_by_name(intf_name)
+
 		ip = IPv4()
 		ip.protocol = IPProtocol.ICMP
-		errmsg_pkt = ip + icmp
-		intf_name, dontcare1, dontcare2 = fwdtable_lookup(ipv4, True)
-		self.net.send_packet(self.net.interface_by_name(intf_name), errmsg_pkt) 
+		ip.dstip = ipv4.srcip
+		ip.srcip = intf.ipaddr
+		ip.ttl = 65
+
+		eth = Ethernet()
+		eth.ethertype = EtherType.IPv4
+		eth.src = intf.ethaddr
+
+		err_pkt = eth + ip + icmp
+		self.ready_packet(intf_name, err_pkt, nexthop)
 
 
 	def router_main(self):    
@@ -259,7 +294,6 @@ class Router(object):
 		'''
 		while True:
 			gotpkt = True
-			not_ICMPEcho = True
 			try:
 				dev_name, pkt = self.net.recv_packet(timeout=1.0)
 			except NoPackets:
@@ -278,41 +312,37 @@ class Router(object):
 				dev = self.net.interface_by_name(dev_name)
 				if arp is not None:		# has ARP header
 					if arp.targetprotoaddr == dev.ipaddr:
-						if arp.targethwaddr == 'ff:ff:ff:ff:ff:ff':	# need to reply
+						if arp.operation == ArpOperation.Request:
 							arp_reply = create_ip_arp_reply(dev.ethaddr,
 															arp.senderhwaddr,
 															dev.ipaddr,
 															arp.senderprotoaddr)
 							self.net.send_packet(dev_name, arp_reply)
-						else: # got reply
+						else:
 							self.arpcache[arp.senderprotoaddr] = arp.senderhwaddr
 							self.send_enqueued_packets()
 					else:
 						log_info("ARP request not for us, dropping: {}".format(str(pkt)))
 				elif ipv4 is not None:	# has IPv4 header
-					intf, index, nexthop = self.fwdtable_lookup(ipv4, False)
+					intf, match, nexthop = self.fwdtable_lookup(ipv4, False)
 
-					if index != -1 and index != -2:	# has a match
+					if match != -1 and match != -2:	# has a match
 						self.ready_packet(intf, pkt, nexthop)
 						self.send_enqueued_packets()
 						
-					elif index == -1:	# no match
-						send_unreachable(ipv4, 0)  #destination network unreachable error 
+					elif match == -1:	# no match
+						self.report_error(pkt, 0)  # destination network unreachable error 
 
-					else:	# index == -2, our packet; check ICMP request
-						#log_info("Packet for us: {}".format(str(pkt)))
+					else:	# match == -2, our packet; check ICMP request
 						if icmp is not None:	# has ICMP header
 							if icmp.icmptype == ICMPType.EchoRequest:	# is echo request
-								icmp_reply = self.create_icmp_reply(ipv4, icmp)
-								intf, index, nexthop = self.fwdtable_lookup(icmp_reply.get_header(IPv4))
-								self.ready_packet(intf, icmp_reply, nexthop)
-						else:
-							send_error(ipv4, 3) #not an ICMPEcho request, destination port unreachable error
-						#log_info("No match in fwding table, dropping: {}".format(str(pkt)))
-					else:	# index == -2, our packet; drop it for now
-						log_info("Packet for us, dropping: {}".format(str(pkt)))
+								icmp_reply, intf_name, nexthop = self.create_icmp_reply(pkt)
+								self.ready_packet(intf_name, icmp_reply, nexthop)
+						else:	# not an ICMP echo request, destination port unreachable error
+							self.report_error(pkt, 3) 
 				else:
 					log_info("Got packet that is not ARP or IPv4, dropping: {}".format(str(pkt)))
+					
 			self.send_enqueued_packets()
 
 
